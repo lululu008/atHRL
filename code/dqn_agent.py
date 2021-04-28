@@ -6,10 +6,22 @@ import numpy as np
 import random
 import tensorflow as tf
 from tensorflow import keras
+from tensorflow.keras import layers
 from tensorflow.keras.layers import Conv2D
 from tensorflow.keras.layers import Dense
 from tensorflow.python.keras import Sequential
 from tensorflow.python.keras.layers import Flatten
+
+
+class Sampling(layers.Layer):
+    """Uses (z_mean, z_log_var) to sample z, the vector encoding a digit."""
+
+    def call(self, inputs):
+        z_mean, z_log_var = inputs
+        batch = tf.shape(z_mean)[0]
+        dim = tf.shape(z_mean)[1]
+        epsilon = tf.keras.backend.random_normal(shape=(batch, dim))
+        return z_mean + tf.exp(0.5 * z_log_var) * epsilon
 
 
 class DqnAgent:
@@ -90,18 +102,32 @@ class DqnAgent:
         :param learning_rate: learning rate
         :return: model
         """
-        q_net = Sequential()
-        q_net.add(tf.keras.Input(shape=state_space))
-        q_net.add(Conv2D(32, 8, strides=4, activation="relu"))
-        q_net.add(Conv2D(64, 4, strides=2, activation="relu"))
-        q_net.add(Conv2D(64, 3, strides=1, activation="relu"))
-        q_net.add(Flatten())
-        q_net.add(Dense(512, activation="relu"))
-        q_net.add(Dense(action_space, activation="linear"))
-        q_net.compile(optimizer=tf.optimizers.Adam(learning_rate=learning_rate),
-                      loss='mse')
-        q_net.summary()
-        return q_net
+        latent_dim = action_space
+
+        encoder_inputs = keras.Input(shape=state_space)
+        x = layers.Conv2D(32, 3, activation="relu", strides=2, padding="same")(encoder_inputs)
+        x = layers.Conv2D(64, 3, activation="relu", strides=2, padding="same")(x)
+        x = layers.Flatten()(x)
+        x = layers.Dense(16, activation="relu")(x)
+        z_mean = layers.Dense(latent_dim, name="z_mean")(x)
+        z_log_var = layers.Dense(latent_dim, name="z_log_var")(x)
+        z = Sampling()([z_mean, z_log_var])
+        encoder = keras.Model(encoder_inputs, [z_mean, z_log_var, z], name="encoder")
+        encoder.summary()
+
+        return encoder
+
+        # q_net = Sequential()
+        # q_net.add(tf.keras.Input(shape=state_space))
+        # q_net.add(Conv2D(32, 8, strides=4, activation="relu"))
+        # q_net.add(Conv2D(64, 4, strides=2, activation="relu"))
+        # q_net.add(Conv2D(64, 3, strides=1, activation="relu"))
+        # q_net.add(Flatten())
+        # q_net.add(Dense(512, activation="relu"))
+        # q_net.add(Dense(action_space, activation="linear"))
+        # q_net.compile(optimizer=tf.optimizers.Adam(learning_rate=learning_rate),
+        #               loss='mse')
+        # q_net.summary()
 
     def save_model(self):
         """

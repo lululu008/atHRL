@@ -82,7 +82,7 @@ class HierarchicalDqnAgent(object):
         self._prev_trajectory = self._curr_trajectory
         point = trajectory_points[self._curr_trajectory]
 
-        return point, behavior_state, trajectory_state
+        return self._curr_behavior, point, behavior_state, trajectory_state
 
     def opt_policy(self, state):
         """

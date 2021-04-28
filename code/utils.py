@@ -1,5 +1,6 @@
-from simple_pid import PID
-import math
+from PID_controller import PIDLongitudinalController
+from PID_controller import PIDLateralController
+from vae.vae_test import
 
 """
 Utilities
@@ -27,8 +28,9 @@ def collect_episode(env, agent, behavior_buffer, trajectory_buffer, render_optio
     while not done:
         if render_option == 'collect':
             env.render()
-        trajectory_point, behavior_state, trajectory_state = agent.collect_policy(state, num_eps)
-        action = compute_action(trajectory_point)
+        behavior, trajectory_point, behavior_state, trajectory_state = agent.collect_policy(state, num_eps)
+        target_speed = compute_speed(behavior)
+        action = compute_action(env, target_speed, trajectory_point)
         next_obs, reward, done, _ = env.step(action)
         next_state = next_obs['birdeye']
         reward_behavior, reward_trajectory = agent.hybrid_reward(done, reward)
@@ -93,20 +95,20 @@ def sigma(first, last, const):
     return summation
 
 
-def compute_action(point):
-    pid_acc = PID(1, 0.1, 0.05, setpoint=1)
-    pid_steer = PID(1, 0.1, 0.05, setpoint=1)
-    dx = point[0]
-    dy = point[1]
-    if dx == 0:
-        if dy < 0:
-            angle = -1.571
-        else:
-            angle = 1.571
-    else:
-        angle = math.atan(dy / dx)
-    distance = math.sqrt(dx * dx + dy * dy)
-    acc = pid_acc(distance)
-    steer = pid_steer(angle)
+def compute_speed(behavior):
+    target_speed = 10
+    if behavior == 0:
+        target_speed = 0
+    elif behavior == 1:
+        target_speed = 10
+    return target_speed
+
+
+def compute_action(env, target_speed, waypoint):
+    pid_acc = PIDLongitudinalController(env=env)
+    pid_steer = PIDLateralController(env=env)
+
+    acc = pid_acc.run_step(target_speed)
+    steer = pid_steer.run_step(waypoint)
     action = [acc, steer]
     return action
