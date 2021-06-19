@@ -261,12 +261,13 @@ class StableTransformerXL(tf.Module):
             tf.Variable(tf.Tensor(self.n_heads, self.d_head_inner, dtype=tf.float32)),
         )
 
-    def init_memory(self, device=tf.device("cpu")):
-        return [
-            # torch.empty(0, dtype=torch.float).to(device)
-            tf.zeros(20, 5, 8, dtype=tf.float32).to(device)
-            for _ in range(self.n_layers + 1)
-        ]
+    def init_memory(self, device=tf.device('/cpu:0')):
+        with device:
+            return [
+                # torch.empty(0, dtype=torch.float).to(device)
+                tf.zeros(20, 5, 8, dtype=tf.float32)
+                for _ in range(self.n_layers + 1)
+            ]
 
     def update_memory(self, previous_memory, hidden_states):
         """
