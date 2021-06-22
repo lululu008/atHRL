@@ -4,36 +4,37 @@ import numpy as np
 
 from transformer import StableTransformerXL
 
-class TransformerGaussianPolicy(tf.Module):
+
+class TransformerGaussianPolicy():
     def __init__(self, state_dim, act_dim, n_transformer_layers=4, n_attn_heads=3):
-        '''
+        """
             NOTE - I/P Shape : [seq_len, batch_size, state_dim]
-        '''
+        """
         super(TransformerGaussianPolicy, self).__init__()
         self.state_dim = state_dim
         self.act_dim = act_dim
 
         self.transformer = StableTransformerXL(d_input=state_dim, n_layers=n_transformer_layers,
-            n_heads=n_attn_heads, d_head_inner=32, d_ff_inner=64)
+                                               n_heads=n_attn_heads, d_head_inner=32, d_ff_inner=64)
         self.memory = None
 
-        self.head_sate_value = tf.keras.layers.Dense(state_dim, 1)
-        self.head_act_mean = tf.keras.layers.Dense(state_dim, act_dim)
+        self.head_sate_value = tf.keras.layers.Dense(1, input_shape=(state_dim, ))
+        self.head_act_mean = tf.keras.layers.Dense(act_dim, input_shape=(state_dim, ))
         log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
-        self.log_std = tf.Variable(tf.Tensor(log_std, dtype=tf.float32))
+        self.log_std = tf.Variable(tf.constant(log_std, dtype=tf.float32))
 
-        self.tanh = tf.tanh()
         self.relu = tf.keras.layers.ReLU()
 
     def _distribution(self, trans_state):
-        mean = self.tanh(self.head_act_mean(trans_state))
+        mean = tf.tanh(self.head_act_mean(trans_state))
         std = tf.exp(self.log_std)
+
         return tfp.distributions.Normal(mean, std)
 
     def _log_prob_from_distribution(self, policy, action):
         return policy.log_prob(action).sum(axis=-1)
 
-    def forward(self, state, action=None):
+    def __call__(self, state, action=None):
         trans_state = self.transformer(state, self.memory)
         trans_state, self.memory = trans_state['logits'], trans_state['memory']
 
@@ -60,11 +61,12 @@ class TransformerGaussianPolicy(tf.Module):
 
         return action.numpy(), logp_a.numpy(), state_value.numpy()
 
+
 if __name__ == '__main__':
-    states = np.random.randn(20, 5, 8) # seq_size, batch_size, dim - better if dim % 2 == 0
+    states = np.random.randn(20, 5, 8)  # seq_size, batch_size, dim - better if dim % 2 == 0
     print("=> Testing Policy")
     policy = TransformerGaussianPolicy(state_dim=states.shape[-1], act_dim=4)
     for i in range(10):
         act = policy(states)
         action = act[0].sample()
-        print(tf.math.is_nan(action).any(), action.shape)
+        print(tf.reduce_any(tf.math.is_nan(action)), action.shape)
