@@ -15,7 +15,7 @@ from tf_agents.policies import greedy_policy
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import eager_utils
 
-from interp_e2e_driving.policies import latent_actor_policy
+from interp_e2e_driving.policies import latent_actor_transformer_policy
 from interp_e2e_driving.utils import gif_utils
 from interp_e2e_driving.utils import nest_utils
 
@@ -53,7 +53,7 @@ class LatentSACAgent(tf_agent.TFAgent):
         self._train_step_counter = train_step_counter
         self._fps = fps
 
-        policy = latent_actor_policy.LatentActorPolicy(
+        policy = latent_actor_transformer_policy.LatentActorPolicy(
             time_step_spec=time_step_spec,
             action_spec=action_spec,
             inner_policy=inner_agent.collect_policy,

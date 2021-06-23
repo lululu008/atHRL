@@ -14,13 +14,6 @@ def compute_triu(x, diagonal):
     return tf.convert_to_tensor(y)
 
 
-def mask_fill_inf(matrix, mask):
-    with DEVICE:
-        print(mask.dtype)
-        num = 3.4 * math.pow(10, 38)
-        return matrix + (-(((mask * num) + num) - num))
-
-
 class PositionalEmbedding():
     def __init__(self, dim):
         super(PositionalEmbedding, self).__init__()

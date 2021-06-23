@@ -17,6 +17,8 @@ from tf_agents.specs import distribution_spec
 from tf_agents.specs import tensor_spec
 from tf_agents.trajectories import policy_step
 
+from interp_e2e_driving.transformer.transformer import StableTransformerXL
+
 
 @gin.configurable
 class LatentActorPolicy(tf_policy.Base):
@@ -49,6 +51,7 @@ class LatentActorPolicy(tf_policy.Base):
         self._model_network = model_network
         self._collect = collect
 
+
         # Info spec
         info_spec = ()
         if collect:
@@ -65,6 +68,9 @@ class LatentActorPolicy(tf_policy.Base):
                                              dtype=tf.float32)
         # The policy will now store the state for actor network, and the latent state
         policy_state_spec = (inner_policy._actor_network.state_spec, latent_spec, action_spec)
+
+        self.transforemer = StableTransformerXL(d_input=policy_state_spec, n_layers=4,
+                                                n_heads=3, d_head_inner=32, d_ff_inner=64)
 
         super(LatentActorPolicy, self).__init__(
             time_step_spec=time_step_spec,
@@ -98,7 +104,9 @@ class LatentActorPolicy(tf_policy.Base):
 
     def _action(self, time_step, policy_state, seed):
         """This will update the state based on time_step and generate action."""
-        distribution_step = self._distribution(time_step, policy_state)
+        trans_state = self.transforemer(policy_state)
+        trans_state = trans_state['logits']
+        distribution_step = self._distribution(time_step, trans_state)
         action = distribution_step.action.sample(seed=seed)
 
         # Update the last action to policy state
