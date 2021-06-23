@@ -19,3 +19,20 @@ $ export PYTHONPATH=$PYTHONPATH:$YourFolder$/CARLA_0.9.6/PythonAPI/carla/dist/ca
 ```
 $ pip install -r requirements.txt
 $ pip install -e .
+```
+
+## Usage
+1. Enter the CARLA simulator folder and launch the CARLA server by:
+```
+$ ./CarlaUE4.sh -windowed -carla-port=2000
+```
+You can use ```Alt+F1``` to get back your mouse control.
+Or you can run in non-display mode by:
+```
+$ DISPLAY= ./CarlaUE4.sh -opengl -carla-port=2000
+```
+
+2. Enter the root folder of this repo and run:
+```
+$ ./run_train_eval.sh
+```
