@@ -32,7 +32,7 @@ Or you can run in non-display mode by:
 $ DISPLAY= ./CarlaUE4.sh -opengl -carla-port=2000
 ```
 
-2. Enter the root folder of this repo and run:
+2. Enter the code folder of this repo and run:
 ```
 $ ./run_train_eval.sh
 ```
