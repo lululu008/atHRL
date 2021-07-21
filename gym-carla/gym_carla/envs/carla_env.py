@@ -576,8 +576,8 @@ class CarlaEnv(gym.Env):
         birdeye_surface = rgb_to_display_surface(birdeye, self.display_size)
         self.display.blit(birdeye_surface, (0, 0))
 
-        # if self.obs_count % 15 == 0 and self.obs_count//15 < 23529:
-        #     pygame.image.save(birdeye_surface, "./keypoints/new/birdeye/screenshot"+str(self.obs_count//15+41772)+".jpeg")
+        # if self.obs_count % 5 == 0:
+        #     pygame.image.save(birdeye_surface, "./images/birdeye/"+str(self.obs_count//30)+".jpeg")
 
         ## Lidar image generation
         point_cloud = []
@@ -619,9 +619,9 @@ class CarlaEnv(gym.Env):
         camera = resize(self.camera_img, (self.obs_size, self.obs_size)) * 255
         camera_surface = rgb_to_display_surface(camera, self.display_size)
         self.display.blit(camera_surface, (self.display_size * 2, 0))
-        #
+
         # if self.obs_count % 8 == 0 and self.obs_count//8 < 30000:
-        #     pygame.image.save(camera_surface, "./keypoints/new/camera/"+str(self.obs_count//8 + 12854).zfill(5)+".png")
+        #     pygame.image.save(camera_surface, "./images/camera/"+str(self.obs_count//8 + 12854).zfill(5)+".png")
 
         ## Save depth camera image
         # camera_depth = resize(self.camera_img_depth, (self.obs_size, self.obs_size)) * 255

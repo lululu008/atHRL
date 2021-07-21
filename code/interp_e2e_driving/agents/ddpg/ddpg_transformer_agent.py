@@ -11,12 +11,13 @@ import gin
 import tensorflow as tf
 
 from tf_agents.agents import tf_agent
-from tf_agents.policies import actor_policy
 from tf_agents.policies import ou_noise_policy
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 from tf_agents.utils import eager_utils
 from tf_agents.utils import nest_utils
+
+from interp_e2e_driving.policies import actor_transformer_policy
 
 
 class DdpgInfo(collections.namedtuple(
@@ -25,7 +26,7 @@ class DdpgInfo(collections.namedtuple(
 
 
 @gin.configurable
-class DdpgAgent(tf_agent.TFAgent):
+class TransformerDdpgAgent(tf_agent.TFAgent):
     """A DDPG Agent."""
 
     def __init__(self,
@@ -50,61 +51,7 @@ class DdpgAgent(tf_agent.TFAgent):
                  summarize_grads_and_vars=False,
                  train_step_counter=None,
                  name=None):
-        """Creates a DDPG Agent.
 
-    Args:
-      time_step_spec: A `TimeStep` spec of the expected time_steps.
-      action_spec: A nest of BoundedTensorSpec representing the actions.
-      actor_network: A tf_agents.network.Network to be used by the agent. The
-        network will be called with call(observation, step_type[, policy_state])
-        and should return (action, new_state).
-      critic_network: A tf_agents.network.Network to be used by the agent. The
-        network will be called with call((observation, action), step_type[,
-        policy_state]) and should return (q_value, new_state).
-      actor_optimizer: The optimizer to use for the actor network.
-      critic_optimizer: The optimizer to use for the critic network.
-      ou_stddev: Standard deviation for the Ornstein-Uhlenbeck (OU) noise added
-        in the default collect policy.
-      ou_damping: Damping factor for the OU noise added in the default collect
-        policy.
-      target_actor_network: (Optional.)  A `tf_agents.network.Network` to be
-        used as the actor target network during Q learning.  Every
-        `target_update_period` train steps, the weights from `actor_network` are
-        copied (possibly withsmoothing via `target_update_tau`) to `
-        target_q_network`.
-
-        If `target_actor_network` is not provided, it is created by making a
-        copy of `actor_network`, which initializes a new network with the same
-        structure and its own layers and weights.
-
-        Performing a `Network.copy` does not work when the network instance
-        already has trainable parameters (e.g., has already been built, or
-        when the network is sharing layers with another).  In these cases, it is
-        up to you to build a copy having weights that are not
-        shared with the original `actor_network`, so that this can be used as a
-        target network.  If you provide a `target_actor_network` that shares any
-        weights with `actor_network`, a warning will be logged but no exception
-        is thrown.
-      target_critic_network: (Optional.) Similar network as target_actor_network
-         but for the critic_network. See documentation for target_actor_network.
-      target_update_tau: Factor for soft update of the target networks.
-      target_update_period: Period for soft update of the target networks.
-      dqda_clipping: when computing the actor loss, clips the gradient dqda
-        element-wise between [-dqda_clipping, dqda_clipping]. Does not perform
-        clipping if dqda_clipping == 0.
-      td_errors_loss_fn:  A function for computing the TD errors loss. If None,
-        a default value of elementwise huber_loss is used.
-      gamma: A discount factor for future rewards.
-      reward_scale_factor: Multiplicative scale for the reward.
-      gradient_clipping: Norm length to clip gradients.
-      debug_summaries: A bool to gather debug summaries.
-      summarize_grads_and_vars: If True, gradient and network variable summaries
-        will be written during training.
-      train_step_counter: An optional counter to increment every time the train
-        op is run.  Defaults to the global_step.
-      name: The name of this agent. All variables in this module will fall
-        under that name. Defaults to the class name.
-    """
         tf.Module.__init__(self, name=name)
         self._actor_network = actor_network
         actor_network.create_variables()
@@ -136,10 +83,10 @@ class DdpgAgent(tf_agent.TFAgent):
         self._update_target = self._get_target_updater(
             target_update_tau, target_update_period)
 
-        policy = actor_policy.ActorPolicy(
+        policy = actor_transformer_policy.ActorPolicy(
             time_step_spec=time_step_spec, action_spec=action_spec,
             actor_network=self._actor_network, clip=True)
-        collect_policy = actor_policy.ActorPolicy(
+        collect_policy = actor_transformer_policy.ActorPolicy(
             time_step_spec=time_step_spec, action_spec=action_spec,
             actor_network=self._actor_network, clip=False)
         collect_policy = ou_noise_policy.OUNoisePolicy(
@@ -148,7 +95,7 @@ class DdpgAgent(tf_agent.TFAgent):
             ou_damping=self._ou_damping,
             clip=True)
 
-        super(DdpgAgent, self).__init__(
+        super(TransformerDdpgAgent, self).__init__(
             time_step_spec,
             action_spec,
             policy,

@@ -3,9 +3,7 @@ import numpy as np
 import math
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
-DEVICE = tf.device('/cpu:0')
+DEVICE = tf.device('/gpu:1')
 
 
 def compute_triu(x, diagonal):

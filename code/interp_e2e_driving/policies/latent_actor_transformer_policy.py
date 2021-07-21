@@ -51,7 +51,6 @@ class LatentActorPolicy(tf_policy.Base):
         self._model_network = model_network
         self._collect = collect
 
-
         # Info spec
         info_spec = ()
         if collect:
@@ -69,6 +68,8 @@ class LatentActorPolicy(tf_policy.Base):
         # The policy will now store the state for actor network, and the latent state
         policy_state_spec = (inner_policy._actor_network.state_spec, latent_spec, action_spec)
 
+        # self.transforemer = StableTransformerXL(d_input=policy_state_spec, n_layers=12,
+        #                                         n_heads=8, d_head_inner=64, d_ff_inner=256)
         self.transforemer = StableTransformerXL(d_input=policy_state_spec, n_layers=4,
                                                 n_heads=3, d_head_inner=32, d_ff_inner=64)
 
@@ -109,7 +110,7 @@ class LatentActorPolicy(tf_policy.Base):
         distribution_step = self._distribution(time_step, trans_state)
         action = distribution_step.action.sample(seed=seed)
 
-        # Update the last action to policy state
+        # Update the last action to policy statetime_step
         network_state, latent_state, _ = distribution_step.state
         policy_state = (network_state, latent_state, action)
 
