@@ -99,6 +99,11 @@ class MultiInputsCriticRnnNetwork(network.Network):
             ]
             # Assert shallow structure is the same. This verifies preprocessing
             # layers can be applied on expected input nests.
+            need_update = False
+            if 'intention' in observation_spec:
+                intention = observation_spec.pop('intention')
+                need_update = True
+
             observation_nest = observation_spec
             # Given the flatten on preprocessing_layers above we need to make sure
             # input_tensor_spec is a sequence for the shallow_structure check below
@@ -107,6 +112,8 @@ class MultiInputsCriticRnnNetwork(network.Network):
                 observation_nest = [observation_spec]
             nest.assert_shallow_structure(
                 preprocessing_layers, observation_nest, check_types=False)
+            if need_update:
+                observation_spec.update({'intention': intention})
 
         if (len(tf.nest.flatten(observation_spec)) > 1 and
                 preprocessing_combiner is None):
@@ -184,11 +191,15 @@ class MultiInputsCriticRnnNetwork(network.Network):
             processed = observation
         else:
             processed = []
+            if 'intention' in observation:
+                intention = observation.pop('intention')
             for obs, layer in zip(
                     nest.flatten_up_to(
                         self._preprocessing_nest, observation, check_types=False),
                     self._flat_preprocessing_layers):
                 processed.append(layer(obs, training=training))
+            if 'intention' in observation:
+                processed.append(intention)
             if len(processed) == 1 and self._preprocessing_combiner is None:
                 # If only one observation is passed and the preprocessing_combiner
                 # is unspecified, use the preprocessed version of this observation.

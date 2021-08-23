@@ -3,8 +3,6 @@ import numpy as np
 import math
 import os
 
-DEVICE = tf.device('/gpu:1')
-
 
 def compute_triu(x, diagonal):
     x = x.numpy()
@@ -119,6 +117,10 @@ class MultiHeadAttentionXL():
         prev_seq = memory.shape[0]
         H, d = self.n_heads, self.d_inner
         # concat memory across sequence dimension
+        print('cur_seq:  ', cur_seq)
+        print('input_:  ', input_)
+        print('prev_seq:  ', prev_seq)
+        print('memory:  ', memory)
         # input_with_memory = [seq + prev_seq x B x d_input] = [40 x 5 x 8]
         input_with_memory = tf.concat([memory, input_], axis=0)
 
@@ -266,13 +268,12 @@ class StableTransformerXL():
             tf.Variable(tf.zeros([self.n_heads, self.d_head_inner], dtype=tf.float32)),
         )
 
-    def init_memory(self, device=tf.device('/cpu:0')):
-        with device:
-            return [
-                # torch.empty(0, dtype=torch.float).to(device)
-                tf.zeros((20, 5, 8), dtype=tf.float32)
-                for _ in range(self.n_layers + 1)
-            ]
+    def init_memory(self):
+        return [
+            # torch.empty(0, dtype=torch.float).to(device)
+            tf.zeros((1, self.d_input), dtype=tf.float32)
+            for _ in range(self.n_layers + 1)
+        ]
 
     def update_memory(self, previous_memory, hidden_states):
         """
@@ -301,21 +302,20 @@ class StableTransformerXL():
             - memory - Optional, list[torch.FloatTensor] = [[T x B x d_inner] x 5]
         """
         if memory is None:
-            memory = self.init_memory(DEVICE)
+            memory = self.init_memory()
         assert len(memory) == len(self.f_layers) + 1
 
         cur_seq, bs = inputs.shape[:2]
         prev_seq = memory[0].shape.as_list()[0]
 
         # dec_attn_mask = [curr x curr + prev x 1] = [20 x 40 x 1]
-        with DEVICE:
-            dec_attn_mask = (
-                tf.cast(compute_triu(
-                    tf.ones((cur_seq, cur_seq + prev_seq)),
-                    diagonal=prev_seq,
-                ),
-                    tf.bool)[..., None]
-            )
+        dec_attn_mask = (
+            tf.cast(compute_triu(
+                tf.ones((cur_seq, cur_seq + prev_seq)),
+                diagonal=prev_seq,
+            ),
+                tf.bool)[..., None]
+        )
 
         pos_ips = tf.range(cur_seq + prev_seq - 1, -1, -1.0, dtype=tf.float32)
         # pos_embs = [curr + prev x 1 x d_input] = [40 x 1 x 8]

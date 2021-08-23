@@ -6,7 +6,7 @@ import gin
 import tensorflow as tf
 from tf_agents.policies import actor_policy
 
-from interp_e2e_driving.utils.common_utils import intention_value, duplicate_digits_2
+from interp_e2e_driving.utils.common_utils import intention_value, duplicate_digits_3
 
 
 @gin.configurable
@@ -40,7 +40,7 @@ class HierarchicalActorPolicy(actor_policy.ActorPolicy):
 
     def _action(self, time_step, policy_state, seed):
         intention_step = self.intention_agent.policy.action(time_step, policy_state)
-        intention_step = intention_step._replace(action=(duplicate_digits_2(intention_step.action)))
+        intention_step = intention_step._replace(action=(duplicate_digits_3(intention_step.action)))
         intention = intention_value(intention_step.action)
         time_step.observation.update({'intention': intention})
         action_step = self.control_agent.policy.action(time_step, policy_state)

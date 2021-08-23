@@ -6,6 +6,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import copy
+
 from absl import app
 from absl import flags
 from absl import logging
@@ -17,20 +19,13 @@ import os
 import tensorflow as tf
 import time
 import collections
-
-os.environ["CUDA_VISIBLE_DEVICES"] = '1'
-# Setup GPU
-gpus = tf.config.experimental.list_physical_devices('GPU')
-for gpu in gpus:
-    tf.config.experimental.set_memory_growth(gpu, True)
-for gpu in gpus:
-    tf.config.experimental.set_virtual_device_configuration(
-        gpu,
-        [tf.config.experimental.VirtualDeviceConfiguration(
-            memory_limit=6500)])
+import sys
+# os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+sys.path.append('/home/jsbt-remote/data/CARLA_0.9.6/PythonAPI/carla/dist/carla-0.9.6-py3.5-linux-x86_64.egg')
 
 import gym
 import gym_carla
+import carla
 
 import tf_agents
 from tf_agents.agents.ddpg import critic_network
@@ -56,30 +51,26 @@ from tf_agents.trajectories import time_step as ts
 from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 
-from interp_e2e_driving.agents.ddpg import ddpg_agent, h_ddpg_agent, h_ddpg_transformer_agent
-from interp_e2e_driving.agents.sac import sac_transformer_agent
-from interp_e2e_driving.agents.latent_sac import latent_sac_agent, h_latent_sac_transformer_agent
-from interp_e2e_driving.agents.latent_sac import latent_sac_transformer_agent
+from interp_e2e_driving.agents.ddpg import ddpg_agent, hierarchical_ddpg, hierarchical_trajectory_ddpg, t_ddpg_agent
+from interp_e2e_driving.agents.latent_sac import latent_sac_agent
 from interp_e2e_driving.environments import filter_observation_wrapper
 from interp_e2e_driving.networks import multi_inputs_actor_rnn_network
 from interp_e2e_driving.networks import multi_inputs_critic_rnn_network
 from interp_e2e_driving.networks import sequential_latent_network
-from interp_e2e_driving.utils import gif_utils
+from interp_e2e_driving.utils import gif_utils, h_driver, t_driver, ht_driver
 
-import sys
+from interp_e2e_driving.utils.common_utils import get_intention
 
-sys.path.append('/home/jsbt-remote/data/CARLA_0.9.6/PythonAPI/carla/dist/carla-0.9.6-py3.5-linux-x86_64.egg')
 os.environ["SDL_VIDEODRIVER"] = "dummy"
 
 flags.DEFINE_string('root_dir', 'logs',
                     'Root directory for writing logs/summaries/checkpoints.')
-flags.DEFINE_string('experiment_name', 'h_ddpg_transformer',
+flags.DEFINE_string('experiment_name', 'ddpg_new',
                     'Experiment name used for naming the output directory.')
 flags.DEFINE_multi_string('gin_file', 'params.gin', 'Path to the trainer config files.')
 flags.DEFINE_multi_string('gin_param', 'load_carla_env.port=2000', 'Gin binding to pass through.')
 
 FLAGS = flags.FLAGS
-
 
 @gin.configurable
 def load_carla_env(
@@ -144,6 +135,8 @@ def load_carla_env(
     gym_spec = gym.spec(env_name)
     gym_env = gym_spec.make(params=env_params)
 
+    carla_env = gym_env
+
     if obs_channels:
         gym_env = filter_observation_wrapper.FilterObservationWrapper(gym_env, obs_channels)
 
@@ -158,7 +151,7 @@ def load_carla_env(
     if action_repeat > 1:
         py_env = wrappers.ActionRepeat(py_env, action_repeat)
 
-    return py_env, eval_py_env
+    return py_env, eval_py_env, carla_env
 
 
 def compute_summaries(metrics,
@@ -235,6 +228,7 @@ def compute_summaries(metrics,
     gif_summary('ReconstructedVideoEvalPolicy', reconstruct_images, 1, fps)
 
 
+
 def pad_and_concatenate_videos(videos, image_keys, is_dict=False):
     max_episode_length = max([len(video) for video in videos])
     if is_dict:
@@ -280,13 +274,115 @@ def normal_projection_net(action_spec,
         std_transform=sac_agent.std_clip_transform,
         scale_distribution=True)
 
+def stack_experience(experience_1):
+    i_stack = []
+    c_stack = []
+    for j in range(len(experience_1)):
+        i = []
+        c = []
+        for k in range(len(experience_1[j])):
+            if k%2 == 0:
+                i.append(experience_1[j][k])
+            else:
+                c.append(experience_1[j][k])
+        i_stack.append(i)
+        c_stack.append(c)
+    return i_stack, c_stack
 
-def compute_hierarchical_time_spec(time_step_spec):
-    h_observation_spec = time_step_spec.observation.append(tf_agents.specs.BoundedTensorSpec(
-        shape=(2, ), dtype=np.int32, name="intention", minimum=0, maximum=5))
-    h_time_step_spec = time_step_spec
-    h_time_step_spec.observation = h_observation_spec
-    return h_time_step_spec
+def search_same(array):
+    def f1(): return 1
+    def f2(): return 0
+    for element in array:
+        result = tf.cond(tf.equal(element[0], element[1]), f1, f2)
+        if result == 1:
+            return True
+    return False
+
+def switch_array(a1, a2,  change):
+    mid = [0]*256
+    for index in change:
+        mid[index] = a1[index]
+        a1[index] = a2[index]
+        a2[index] = mid[index]
+    return a1, a2
+
+def extract_trajectory(experience, input_name):
+    i_step_type, c_step_type = stack_experience(experience.step_type)
+    i_action, c_action = stack_experience(experience.action)
+    i_policy_info, c_policy_info = stack_experience(experience.policy_info)
+    i_next_step_type, c_next_step_type = stack_experience(experience.next_step_type)
+    i_reward, c_reward = stack_experience(experience.reward)
+    i_discount, c_discount = stack_experience(experience.discount)
+    i_input, c_input = stack_experience(experience.observation[input_name])
+    i_lidar, c_lidar = stack_experience(experience.observation['lidar'])
+
+    change = []
+    for i in range(len(i_action)):
+        mark = search_same(i_action[i])
+        if mark == False:
+            change.append(i)
+    i_step_type, c_step_type = switch_array(i_step_type, c_step_type, change)
+    i_action, c_action = switch_array(i_action, c_action, change)
+    i_next_step_type, c_next_step_type = switch_array(i_next_step_type, c_next_step_type, change)
+    i_reward, c_reward = switch_array(i_reward, c_reward, change)
+    i_discount, c_discount = switch_array(i_discount, c_discount, change)
+    i_input, c_input = switch_array(i_input, c_input, change)
+    i_lidar, c_lidar = switch_array(i_lidar, c_lidar, change)
+
+    return i_step_type, c_step_type, i_action, c_action, i_policy_info, c_policy_info, i_next_step_type, c_next_step_type, i_reward, c_reward, i_discount, c_discount, i_input, c_input, i_lidar, c_lidar
+
+def combine_array(experience_0, experience_1):
+    combined = []
+    for a0 in experience_0:
+        # array = []
+        for a1 in experience_1:
+            array = a0 + a1
+        combined.append(array)
+    return combined
+
+def prepare_experience(intention_experience, control_experience, input_name):
+    i_step_type_0, c_step_type_0, i_action_0, c_action_0, _, _, i_next_step_type_0, c_next_step_type_0, i_reward_0, c_reward_0, i_discount_0, c_discount_0, i_input_0, c_input_0, i_lidar_0, c_lidar_0 = extract_trajectory(intention_experience, input_name)
+    i_step_type_1, c_step_type_1, i_action_1, c_action_1, _, _, i_next_step_type_1, c_next_step_type_1, i_reward_1, c_reward_1, i_discount_1, c_discount_1, i_input_1, c_input_1, i_lidar_1, c_lidar_1 = extract_trajectory(control_experience, input_name)
+    
+    i_step_type = tf.stack(combine_array(i_step_type_0, i_step_type_1))
+    c_step_type = tf.stack(combine_array(c_step_type_0, c_step_type_1))
+    i_action = tf.stack(combine_array(i_action_0, i_action_1))
+    c_action = tf.stack(combine_array(c_action_0, c_action_1))
+    i_next_step_type = tf.stack(combine_array(i_next_step_type_0, i_next_step_type_1))
+    c_next_step_type = tf.stack(combine_array(c_next_step_type_0, c_next_step_type_1))
+    i_reward = tf.stack(combine_array(i_reward_0, i_reward_1))
+    c_reward = tf.stack(combine_array(c_reward_0, c_reward_1))
+    i_discount = tf.stack(combine_array(i_discount_0, i_discount_1))
+    c_discount = tf.stack(combine_array(c_discount_0, c_discount_1))
+    i_input = tf.stack(combine_array(i_input_0, i_input_1))
+    c_input = tf.stack(combine_array(c_input_0, c_input_1))
+    i_lidar = tf.stack(combine_array(i_lidar_0, i_lidar_1))
+    c_lidar = tf.stack(combine_array(c_lidar_0, c_lidar_1))
+    i_policy_info = ()
+    c_policy_info = ()
+
+    c_intention = []
+    for array in i_action:
+        intention_array = []
+        for action in array:
+            intention = get_intention(action)
+            intention_array.append(intention)
+        c_intention.append(intention_array)
+
+    c_intention = tf.stack(c_intention)
+
+    i_observation = collections.OrderedDict()
+    c_observation = collections.OrderedDict()
+    i_observation.update({input_name: i_input})
+    i_observation.update({'lidar': i_lidar})
+    c_observation.update({input_name: c_input})
+    c_observation.update({'lidar': c_lidar})
+    c_observation.update({'intention': c_intention})
+
+    _intention_experience = trajectory.Trajectory(i_step_type, i_observation, i_action, i_policy_info, i_next_step_type, i_reward, i_discount)
+    _control_experience = trajectory.Trajectory(c_step_type, c_observation, c_action, c_policy_info, c_next_step_type, c_reward, c_discount)
+
+    return _intention_experience, _control_experience
 
 
 class Preprocessing_Layer(tf.keras.layers.Layer):
@@ -329,7 +425,7 @@ def train_eval(
         root_dir,
         experiment_name,  # experiment name
         env_name='carla-v0',
-        agent_name='h_ddpg_transformer',  # agent's name
+        agent_name='h_ddpg',  # agent's name
         num_iterations=int(1e7),
         actor_fc_layers=(256, 256),
         critic_obs_fc_layers=None,
@@ -350,8 +446,11 @@ def train_eval(
         dqda_clipping=None,  # for DDPG
         exploration_noise_std=0.1,  # exploration paramter for td3
         actor_update_period=2,  # for td3
-        intention_action_spec=tf_agents.specs.BoundedTensorSpec(shape=(2,), dtype=np.int32, name="intention", minimum=0,
+        intention_action_spec=tf_agents.specs.BoundedTensorSpec(shape=(2,), dtype=tf.float32, name="intention", minimum=0,
                                                                 maximum=5),  # for H-DDPG
+        intention_observation_spec=tf_agents.specs.TensorSpec(shape=(), dtype=tf.int32, name="intention"),
+        trajectory_action_spec=tf_agents.specs.BoundedTensorSpec(shape=(3,), dtype=tf.float32, name="speed and point", minimum=[0.0, -3.0, 0.0],
+                                                                maximum=[20.0, 3.0, 3.0]),
         # Params for collect
         initial_collect_steps=1000,
         collect_steps_per_iteration=1,
@@ -363,7 +462,7 @@ def train_eval(
         train_steps_per_iteration=1,
         initial_model_train_steps=100000,  # initial model training
         batch_size=256,
-        model_batch_size=32,  # model training batch size
+        model_batch_size=16,  # model training batch size
         sequence_length=4,  # number of timesteps to train model
         actor_learning_rate=3e-4,
         critic_learning_rate=3e-4,
@@ -399,6 +498,16 @@ def train_eval(
     #         [tf.config.experimental.VirtualDeviceConfiguration(
     #             memory_limit=None)])
 
+    # Setup GPU
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
+    # for gpu in gpus:
+    #     tf.config.experimental.set_virtual_device_configuration(
+    #         gpu,
+    #         [tf.config.experimental.VirtualDeviceConfiguration(
+    #             memory_limit=7500)])
+
     # Get train and eval direction
     root_dir = os.path.expanduser(root_dir)
     root_dir = os.path.join(root_dir, env_name, experiment_name)
@@ -423,14 +532,14 @@ def train_eval(
     with tf.summary.record_if(
             lambda: tf.math.equal(global_step % summary_interval, 0)):
         # Create Carla environment
-        if agent_name == 'latent_sac' or agent_name == 'latent_sac_transformer' or agent_name == 'h_latent_sac_transformer':
-            py_env, eval_py_env = load_carla_env(env_name='carla-v0', obs_channels=input_names + mask_names,
+        if agent_name == 'latent_sac':
+            py_env, eval_py_env, _ = load_carla_env(env_name='carla-v0', obs_channels=input_names + mask_names,
                                                  action_repeat=action_repeat)
         elif agent_name == 'dqn':
-            py_env, eval_py_env = load_carla_env(env_name='carla-v0', discrete=True, obs_channels=input_names,
+            py_env, eval_py_env, _ = load_carla_env(env_name='carla-v0', discrete=True, obs_channels=input_names,
                                                  action_repeat=action_repeat)
         else:
-            py_env, eval_py_env = load_carla_env(env_name='carla-v0', obs_channels=input_names + mask_names,
+            py_env, eval_py_env, carla_env = load_carla_env(env_name='carla-v0', obs_channels=input_names,
                                                  action_repeat=action_repeat)
 
         tf_env = tf_py_environment.TFPyEnvironment(py_env)
@@ -441,9 +550,14 @@ def train_eval(
         time_step_spec = tf_env.time_step_spec()
         observation_spec = time_step_spec.observation
         action_spec = tf_env.action_spec()
+        if agent_name == 't_ddpg' or agent_name == 'ht_ddpg':
+            intention_action_spec = tf_agents.specs.BoundedTensorSpec(shape=(3,), dtype=tf.float32, name="intention", minimum=0, maximum=5)
+            action_spec = trajectory_action_spec
+        control_time_step_spec = copy.deepcopy(time_step_spec)
+        control_time_step_spec.observation.update({'intention': intention_observation_spec})
 
         ## Make tf agent
-        if agent_name == 'latent_sac' or agent_name == 'latent_sac_transformer' or agent_name == 'h_latent_sac_transformer':
+        if agent_name == 'latent_sac':
             # Get model network for latent sac
             if model_network_ctor_type == 'hierarchical':
                 model_network_ctor = sequential_latent_network.SequentialLatentModelHierarchical
@@ -493,55 +607,21 @@ def train_eval(
                 train_step_counter=global_step)
             inner_agent.initialize()
 
-            if agent_name == 'latent_sac_transformer':
-                # Build the latent sac agent with transformer
-                tf_agent = latent_sac_transformer_agent.LatentSACAgent(
-                    time_step_spec,
-                    action_spec,
-                    inner_agent=inner_agent,
-                    model_network=model_net,
-                    model_optimizer=tf.compat.v1.train.AdamOptimizer(
-                        learning_rate=model_learning_rate),
-                    model_batch_size=model_batch_size,
-                    num_images_per_summary=num_images_per_summary,
-                    sequence_length=sequence_length,
-                    gradient_clipping=gradient_clipping,
-                    summarize_grads_and_vars=summarize_grads_and_vars,
-                    train_step_counter=global_step,
-                    fps=fps)
-            elif agent_name == 'latent_sac':
-                # Build the latent sac agent
-                tf_agent = latent_sac_agent.LatentSACAgent(
-                    time_step_spec,
-                    action_spec,
-                    inner_agent=inner_agent,
-                    model_network=model_net,
-                    model_optimizer=tf.compat.v1.train.AdamOptimizer(
-                        learning_rate=model_learning_rate),
-                    model_batch_size=model_batch_size,
-                    num_images_per_summary=num_images_per_summary,
-                    sequence_length=sequence_length,
-                    gradient_clipping=gradient_clipping,
-                    summarize_grads_and_vars=summarize_grads_and_vars,
-                    train_step_counter=global_step,
-                    fps=fps)
-            elif agent_name == 'h_latent_sac_transformer':
-                tf_agent = h_latent_sac_transformer_agent.HierarchicalLatentSACAgent(
-                    intention_time_step_spec=time_step_spec,
-                    intention_action_spec=intention_action_spec,
-                    control_time_step_spec=compute_hierarchical_time_spec(time_step_spec),
-                    control_action_spec=action_spec,
-                    inner_agent=inner_agent,
-                    model_network=model_net,
-                    model_optimizer=tf.compat.v1.train.AdamOptimizer(
-                        learning_rate=model_learning_rate),
-                    model_batch_size=model_batch_size,
-                    num_images_per_summary=num_images_per_summary,
-                    sequence_length=sequence_length,
-                    gradient_clipping=gradient_clipping,
-                    summarize_grads_and_vars=summarize_grads_and_vars,
-                    train_step_counter=global_step,
-                    fps=fps)
+            # Build the latent sac agent
+            tf_agent = latent_sac_agent.LatentSACAgent(
+                time_step_spec,
+                action_spec,
+                inner_agent=inner_agent,
+                model_network=model_net,
+                model_optimizer=tf.compat.v1.train.AdamOptimizer(
+                    learning_rate=model_learning_rate),
+                model_batch_size=model_batch_size,
+                num_images_per_summary=num_images_per_summary,
+                sequence_length=sequence_length,
+                gradient_clipping=gradient_clipping,
+                summarize_grads_and_vars=summarize_grads_and_vars,
+                train_step_counter=global_step,
+                fps=fps)
 
         else:
             # Set up preprosessing layers for dictionary observation inputs
@@ -578,7 +658,7 @@ def train_eval(
                     summarize_grads_and_vars=summarize_grads_and_vars,
                     train_step_counter=global_step)
 
-            elif agent_name == 'ddpg' or agent_name == 'td3' or agent_name == 'h_ddpg' or agent_name == 'h_ddpg_transformer':
+            elif agent_name == 'ddpg' or agent_name == 'td3' or agent_name == 't_ddpg':
                 actor_rnn_net = multi_inputs_actor_rnn_network.MultiInputsActorRnnNetwork(
                     observation_spec,
                     action_spec,
@@ -640,35 +720,10 @@ def train_eval(
                         debug_summaries=debug_summaries,
                         summarize_grads_and_vars=summarize_grads_and_vars,
                         train_step_counter=global_step)
-                elif agent_name == 'h_ddpg':
-                    tf_agent = h_ddpg_agent.HierarchicalDdpgAgent(
-                        intention_time_step_spec=time_step_spec,
-                        intention_action_spec=intention_action_spec,
-                        control_time_step_spec=compute_hierarchical_time_spec(time_step_spec),
-                        control_action_spec=action_spec,
-                        actor_network=actor_rnn_net,
-                        critic_network=critic_rnn_net,
-                        actor_optimizer=tf.compat.v1.train.AdamOptimizer(
-                            learning_rate=actor_learning_rate),
-                        critic_optimizer=tf.compat.v1.train.AdamOptimizer(
-                            learning_rate=critic_learning_rate),
-                        ou_stddev=ou_stddev,
-                        ou_damping=ou_damping,
-                        target_update_tau=target_update_tau,
-                        target_update_period=target_update_period,
-                        dqda_clipping=dqda_clipping,
-                        td_errors_loss_fn=None,
-                        gamma=gamma,
-                        reward_scale_factor=reward_scale_factor,
-                        gradient_clipping=gradient_clipping,
-                        debug_summaries=debug_summaries,
-                        summarize_grads_and_vars=summarize_grads_and_vars)
-                elif agent_name == 'h_ddpg_transformer':
-                    tf_agent = h_ddpg_transformer_agent.HierarchicalDdpgAgent(
-                        intention_time_step_spec=time_step_spec,
-                        intention_action_spec=intention_action_spec,
-                        control_time_step_spec=compute_hierarchical_time_spec(time_step_spec),
-                        control_action_spec=action_spec,
+                elif agent_name == 't_ddpg':
+                    tf_agent = t_ddpg_agent.DdpgAgent(
+                        time_step_spec,
+                        action_spec,
                         actor_network=actor_rnn_net,
                         critic_network=critic_rnn_net,
                         actor_optimizer=tf.compat.v1.train.AdamOptimizer(
@@ -687,7 +742,100 @@ def train_eval(
                         debug_summaries=debug_summaries,
                         summarize_grads_and_vars=summarize_grads_and_vars)
 
-            elif agent_name == 'sac' or agent_name == 'sac_transformer':
+            elif agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
+                intention_actor_rnn_net = multi_inputs_actor_rnn_network.MultiInputsActorRnnNetwork(
+                    observation_spec,
+                    intention_action_spec,
+                    preprocessing_layers=preprocessing_layers,
+                    preprocessing_combiner=preprocessing_combiner,
+                    input_fc_layer_params=actor_fc_layers,
+                    lstm_size=actor_lstm_size,
+                    output_fc_layer_params=actor_output_fc_layers)
+
+                intention_critic_rnn_net = multi_inputs_critic_rnn_network.MultiInputsCriticRnnNetwork(
+                    (observation_spec, intention_action_spec),
+                    preprocessing_layers=preprocessing_layers,
+                    preprocessing_combiner=preprocessing_combiner,
+                    action_fc_layer_params=critic_action_fc_layers,
+                    joint_fc_layer_params=critic_joint_fc_layers,
+                    lstm_size=critic_lstm_size,
+                    output_fc_layer_params=critic_output_fc_layers)
+
+                control_observation_spec = copy.deepcopy(observation_spec)
+                control_observation_spec.update({'intention': intention_observation_spec})
+
+                control_actor_rnn_net = multi_inputs_actor_rnn_network.MultiInputsActorRnnNetwork(
+                    control_observation_spec,
+                    action_spec,
+                    preprocessing_layers=preprocessing_layers,
+                    preprocessing_combiner=preprocessing_combiner,
+                    input_fc_layer_params=actor_fc_layers,
+                    lstm_size=actor_lstm_size,
+                    output_fc_layer_params=actor_output_fc_layers)
+
+                control_critic_rnn_net = multi_inputs_critic_rnn_network.MultiInputsCriticRnnNetwork(
+                    (control_observation_spec, action_spec),
+                    preprocessing_layers=preprocessing_layers,
+                    preprocessing_combiner=preprocessing_combiner,
+                    action_fc_layer_params=critic_action_fc_layers,
+                    joint_fc_layer_params=critic_joint_fc_layers,
+                    lstm_size=critic_lstm_size,
+                    output_fc_layer_params=critic_output_fc_layers)
+
+                if agent_name == 'h_ddpg':
+                    tf_agent = hierarchical_ddpg.HierarchicalDdpgAgent(
+                        intention_time_step_spec=time_step_spec,
+                        intention_action_spec=intention_action_spec,
+                        control_time_step_spec=control_time_step_spec,
+                        control_action_spec=action_spec,
+                        intention_actor_network=intention_actor_rnn_net,
+                        intention_critic_network=intention_critic_rnn_net,
+                        control_actor_network=control_actor_rnn_net,
+                        control_critic_network=control_critic_rnn_net,
+                        actor_optimizer=tf.compat.v1.train.AdamOptimizer(
+                            learning_rate=actor_learning_rate),
+                        critic_optimizer=tf.compat.v1.train.AdamOptimizer(
+                            learning_rate=critic_learning_rate),
+                        ou_stddev=ou_stddev,
+                        ou_damping=ou_damping,
+                        target_update_tau=target_update_tau,
+                        target_update_period=target_update_period,
+                        dqda_clipping=dqda_clipping,
+                        td_errors_loss_fn=None,
+                        gamma=gamma,
+                        reward_scale_factor=reward_scale_factor,
+                        gradient_clipping=gradient_clipping,
+                        debug_summaries=debug_summaries,
+                        summarize_grads_and_vars=summarize_grads_and_vars)
+                
+                elif agent_name == 'ht_ddpg':
+                    tf_agent = hierarchical_trajectory_ddpg.HierarchicalDdpgAgent(
+                        intention_time_step_spec=time_step_spec,
+                        intention_action_spec=intention_action_spec,
+                        control_time_step_spec=control_time_step_spec,
+                        control_action_spec=action_spec,
+                        intention_actor_network=intention_actor_rnn_net,
+                        intention_critic_network=intention_critic_rnn_net,
+                        control_actor_network=control_actor_rnn_net,
+                        control_critic_network=control_critic_rnn_net,
+                        actor_optimizer=tf.compat.v1.train.AdamOptimizer(
+                            learning_rate=actor_learning_rate),
+                        critic_optimizer=tf.compat.v1.train.AdamOptimizer(
+                            learning_rate=critic_learning_rate),
+                        ou_stddev=ou_stddev,
+                        ou_damping=ou_damping,
+                        target_update_tau=target_update_tau,
+                        target_update_period=target_update_period,
+                        dqda_clipping=dqda_clipping,
+                        td_errors_loss_fn=None,
+                        gamma=gamma,
+                        reward_scale_factor=reward_scale_factor,
+                        gradient_clipping=gradient_clipping,
+                        debug_summaries=debug_summaries,
+                        summarize_grads_and_vars=summarize_grads_and_vars)
+
+
+            elif agent_name == 'sac':
                 actor_distribution_rnn_net = actor_distribution_rnn_network.ActorDistributionRnnNetwork(
                     observation_spec,
                     action_spec,
@@ -707,75 +855,55 @@ def train_eval(
                     lstm_size=critic_lstm_size,
                     output_fc_layer_params=critic_output_fc_layers)
 
-                if agent_name == 'sac':
-                    tf_agent = sac_agent.SacAgent(
-                        time_step_spec,
-                        action_spec,
-                        actor_network=actor_distribution_rnn_net,
-                        critic_network=critic_rnn_net,
-                        actor_optimizer=tf.compat.v1.train.AdamOptimizer(
-                            learning_rate=actor_learning_rate),
-                        critic_optimizer=tf.compat.v1.train.AdamOptimizer(
-                            learning_rate=critic_learning_rate),
-                        alpha_optimizer=tf.compat.v1.train.AdamOptimizer(
-                            learning_rate=alpha_learning_rate),
-                        target_update_tau=target_update_tau,
-                        target_update_period=target_update_period,
-                        td_errors_loss_fn=tf.math.squared_difference,  # make critic loss dimension compatible
-                        gamma=gamma,
-                        reward_scale_factor=reward_scale_factor,
-                        gradient_clipping=gradient_clipping,
-                        debug_summaries=debug_summaries,
-                        summarize_grads_and_vars=summarize_grads_and_vars,
-                        train_step_counter=global_step)
-                elif agent_name == 'sac_transformer':
-                    tf_agent = sac_transformer_agent.SacAgent(
-                        time_step_spec,
-                        action_spec,
-                        actor_network=actor_distribution_rnn_net,
-                        critic_network=critic_rnn_net,
-                        actor_optimizer=tf.compat.v1.train.AdamOptimizer(
-                            learning_rate=actor_learning_rate),
-                        critic_optimizer=tf.compat.v1.train.AdamOptimizer(
-                            learning_rate=critic_learning_rate),
-                        alpha_optimizer=tf.compat.v1.train.AdamOptimizer(
-                            learning_rate=alpha_learning_rate),
-                        target_update_tau=target_update_tau,
-                        target_update_period=target_update_period,
-                        td_errors_loss_fn=tf.math.squared_difference,  # make critic loss dimension compatible
-                        gamma=gamma,
-                        reward_scale_factor=reward_scale_factor,
-                        gradient_clipping=gradient_clipping,
-                        debug_summaries=debug_summaries,
-                        summarize_grads_and_vars=summarize_grads_and_vars,
-                        train_step_counter=global_step)
+                tf_agent = sac_agent.SacAgent(
+                    time_step_spec,
+                    action_spec,
+                    actor_network=actor_distribution_rnn_net,
+                    critic_network=critic_rnn_net,
+                    actor_optimizer=tf.compat.v1.train.AdamOptimizer(
+                        learning_rate=actor_learning_rate),
+                    critic_optimizer=tf.compat.v1.train.AdamOptimizer(
+                        learning_rate=critic_learning_rate),
+                    alpha_optimizer=tf.compat.v1.train.AdamOptimizer(
+                        learning_rate=alpha_learning_rate),
+                    target_update_tau=target_update_tau,
+                    target_update_period=target_update_period,
+                    td_errors_loss_fn=tf.math.squared_difference,  # make critic loss dimension compatible
+                    gamma=gamma,
+                    reward_scale_factor=reward_scale_factor,
+                    gradient_clipping=gradient_clipping,
+                    debug_summaries=debug_summaries,
+                    summarize_grads_and_vars=summarize_grads_and_vars,
+                    train_step_counter=global_step)
 
             else:
                 raise NotImplementedError
 
-        if agent_name == 'h_ddpg' or agent_name == 'h_ddpg_transformer' or agent_name == 'h_latent_sac_transformer':
+        if agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
             intention_agent = tf_agent.intention_agent
             control_agent = tf_agent.control_agent
             intention_agent.initialize()
             control_agent.initialize()
 
-            # Get replay buffer
-            intention_replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
+            # # Get replay buffer
+            hierarchical_replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
                 data_spec=intention_agent.collect_data_spec,
                 batch_size=1,  # No parallel environments
                 max_length=replay_buffer_capacity)
-            control_replay_buffer = tf_uniform_replay_buffer.TFUniformReplayBuffer(
-                data_spec=control_agent.collect_data_spec,
-                batch_size=1,  # No parallel environments
-                max_length=replay_buffer_capacity)
 
-            intention_replay_observer = [intention_replay_buffer.add_batch]
-            control_replay_observer = [control_replay_buffer.add_batch]
+            hierarchical_replay_observer = [hierarchical_replay_buffer.add_batch]
 
             # Get policies
             # eval_policy = greedy_policy.GreedyPolicy(tf_agent.policy)
             eval_policy = tf_agent.policy
-            collect_policy = tf_agent.collect_policy
+
+            intention_collect_policy = intention_agent.collect_policy
+            control_collect_policy = control_agent.collect_policy
+
+            initial_intention_collect_policy = random_tf_policy.RandomTFPolicy(
+                time_step_spec, intention_action_spec)
+            initial_control_collect_policy = random_tf_policy.RandomTFPolicy(
+                control_time_step_spec, action_spec)
 
         else:
             tf_agent.initialize()
@@ -792,87 +920,189 @@ def train_eval(
             eval_policy = tf_agent.policy
             collect_policy = tf_agent.collect_policy
 
-        initial_collect_policy = random_tf_policy.RandomTFPolicy(
-            time_step_spec, action_spec)
+            initial_collect_policy = random_tf_policy.RandomTFPolicy(
+                time_step_spec, action_spec)
 
         # Train metrics
-        env_steps = tf_metrics.EnvironmentSteps()
-        average_return = tf_metrics.AverageReturnMetric(
-            buffer_size=num_eval_episodes,
-            batch_size=tf_env.batch_size)
-        train_metrics = [
-            tf_metrics.NumberOfEpisodes(),
-            env_steps,
-            average_return,
-            tf_metrics.AverageEpisodeLengthMetric(
+        if agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
+            intention_num_episodes = tf_metrics.NumberOfEpisodes()
+            env_steps = tf_metrics.EnvironmentSteps()
+            intention_average_return = tf_metrics.AverageReturnMetric(
                 buffer_size=num_eval_episodes,
-                batch_size=tf_env.batch_size),
-        ]
+                batch_size=tf_env.batch_size)
+            intention_average_length = tf_metrics.AverageEpisodeLengthMetric(
+                buffer_size=num_eval_episodes,
+                batch_size=tf_env.batch_size)
+            intention_train_metrics = [
+                intention_num_episodes,
+                env_steps,
+                intention_average_return,
+                intention_average_length,
+            ]
 
-        # Checkpointers
-        train_checkpointer = common.Checkpointer(
-            ckpt_dir=os.path.join(root_dir, 'train'),
-            agent=tf_agent,
-            global_step=global_step,
-            metrics=metric_utils.MetricsGroup(train_metrics, 'train_metrics'),
-            max_to_keep=2)
-        policy_checkpointer = common.Checkpointer(
-            ckpt_dir=os.path.join(root_dir, 'policy'),
-            policy=eval_policy,
-            global_step=global_step,
-            max_to_keep=2)
-        rb_checkpointer = common.Checkpointer(
-            ckpt_dir=os.path.join(root_dir, 'replay_buffer'),
-            max_to_keep=1,
-            replay_buffer=replay_buffer)
-        train_checkpointer.initialize_or_restore()
-        rb_checkpointer.initialize_or_restore()
+            control_num_episodes = tf_metrics.NumberOfEpisodes()
+            control_average_return = tf_metrics.AverageReturnMetric(
+                buffer_size=num_eval_episodes,
+                batch_size=tf_env.batch_size)
+            control_average_length = tf_metrics.AverageEpisodeLengthMetric(
+                buffer_size=num_eval_episodes,
+                batch_size=tf_env.batch_size)
+            control_train_metrics = [
+                control_num_episodes,
+                env_steps,
+                control_average_return,
+                control_average_length,
+            ]
+        else:
+            env_steps = tf_metrics.EnvironmentSteps()
+            average_return = tf_metrics.AverageReturnMetric(
+                buffer_size=num_eval_episodes,
+                batch_size=tf_env.batch_size)
+            train_metrics = [
+                tf_metrics.NumberOfEpisodes(),
+                env_steps,
+                average_return,
+                tf_metrics.AverageEpisodeLengthMetric(
+                    buffer_size=num_eval_episodes,
+                    batch_size=tf_env.batch_size),
+            ]
 
-        if agent_name == 'h_ddpg' or agent_name == 'h_ddpg_transformer' or agent_name == 'h_latent_sac_transformer':
-            # Collect driver
-            initial_intention_collect_driver = dynamic_step_driver.DynamicStepDriver(
+        print('Initializing checkpointer')
+        if agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
+            # Checkpointers
+            intention_train_checkpointer = common.Checkpointer(
+                ckpt_dir=os.path.join(root_dir, 'intention_train'),
+                agent=tf_agent.intention_agent,
+                global_step=global_step,
+                metrics=metric_utils.MetricsGroup(intention_train_metrics, 'intention_train_metrics'),
+                max_to_keep=2)
+            control_train_checkpointer = common.Checkpointer(
+                ckpt_dir=os.path.join(root_dir, 'control_train'),
+                agent=tf_agent.control_agent,
+                global_step=global_step,
+                metrics=metric_utils.MetricsGroup(control_train_metrics, 'control_train_metrics'),
+                max_to_keep=2)
+            policy_checkpointer = common.Checkpointer(
+                ckpt_dir=os.path.join(root_dir, 'policy'),
+                policy=eval_policy,
+                global_step=global_step,
+                max_to_keep=2)
+            hierarchical_rb_checkpointer = common.Checkpointer(
+                ckpt_dir=os.path.join(root_dir, 'intention_replay_buffer'),
+                max_to_keep=1,
+                replay_buffer=hierarchical_replay_buffer)
+
+            intention_train_checkpointer.initialize_or_restore()
+            control_train_checkpointer.initialize_or_restore()
+            # intention_rb_checkpointer.initialize_or_restore()
+            # control_rb_checkpointer.initialize_or_restore()
+            hierarchical_rb_checkpointer.initialize_or_restore()
+        else:
+            # Checkpointers
+            train_checkpointer = common.Checkpointer(
+                ckpt_dir=os.path.join(root_dir, 'train'),
+                agent=tf_agent,
+                global_step=global_step,
+                metrics=metric_utils.MetricsGroup(train_metrics, 'train_metrics'),
+                max_to_keep=2)
+            policy_checkpointer = common.Checkpointer(
+                ckpt_dir=os.path.join(root_dir, 'policy'),
+                policy=eval_policy,
+                global_step=global_step,
+                max_to_keep=2)
+            rb_checkpointer = common.Checkpointer(
+                ckpt_dir=os.path.join(root_dir, 'replay_buffer'),
+                max_to_keep=1,
+                replay_buffer=replay_buffer)
+            train_checkpointer.initialize_or_restore()
+            rb_checkpointer.initialize_or_restore()
+
+        if agent_name == 'h_ddpg':
+            initial_hierarachical_collect_driver = h_driver.DynamicStepDriver(
                 tf_env,
-                initial_collect_policy,
-                observers=intention_replay_observer + train_metrics,
+                initial_intention_collect_policy,
+                initial_control_collect_policy,
+                intention_observers=hierarchical_replay_observer + intention_train_metrics,
+                control_observers=hierarchical_replay_observer + control_train_metrics,
                 num_steps=initial_collect_steps)
-            initial_control_collect_driver = dynamic_step_driver.DynamicStepDriver(
-                tf_env,
-                initial_collect_policy,
-                observers=control_replay_observer + train_metrics,
-                num_steps=initial_collect_steps)
 
-            intention_collect_driver = dynamic_step_driver.DynamicStepDriver(
+            hierarachical_collect_driver = h_driver.DynamicStepDriver(
                 tf_env,
-                collect_policy,
-                observers=intention_replay_observer + train_metrics,
-                num_steps=collect_steps_per_iteration)
-            control_collect_driver = dynamic_step_driver.DynamicStepDriver(
-                tf_env,
-                collect_policy,
-                observers=control_replay_observer + train_metrics,
+                intention_collect_policy,
+                control_collect_policy,
+                intention_observers=hierarchical_replay_observer + intention_train_metrics,
+                control_observers=hierarchical_replay_observer + control_train_metrics,
                 num_steps=collect_steps_per_iteration)
 
             # Optimize the performance by using tf functions
-            initial_intention_collect_driver.run = common.function(initial_intention_collect_driver.run)
-            initial_control_collect_driver.run = common.function(initial_control_collect_driver.run)
+            initial_hierarachical_collect_driver.run = common.function(initial_hierarachical_collect_driver.run)
+            hierarachical_collect_driver.run = common.function(hierarachical_collect_driver.run)
 
-            intention_collect_driver.run = common.function(intention_collect_driver.run)
-            control_collect_driver.run = common.function(control_collect_driver.run)
+            if env_steps.result() == 0 or hierarchical_replay_buffer.num_frames() == 0:
+                logging.info(
+                    'Initializing replay buffer by collecting experience for %d steps'
+                    'with a random policy.', initial_collect_steps)
+                initial_hierarachical_collect_driver.run()
+
+        elif agent_name == 'ht_ddpg':
+            initial_hierarachical_collect_driver = ht_driver.DynamicStepDriver(
+                tf_env,
+                carla_env,
+                initial_intention_collect_policy,
+                initial_control_collect_policy,
+                intention_observers=hierarchical_replay_observer + intention_train_metrics,
+                control_observers=hierarchical_replay_observer + control_train_metrics,
+                num_steps=initial_collect_steps)
+
+            hierarachical_collect_driver = ht_driver.DynamicStepDriver(
+                tf_env,
+                carla_env,
+                intention_collect_policy,
+                control_collect_policy,
+                intention_observers=hierarchical_replay_observer + intention_train_metrics,
+                control_observers=hierarchical_replay_observer + control_train_metrics,
+                num_steps=collect_steps_per_iteration)
+
+            # Optimize the performance by using tf functions
+            initial_hierarachical_collect_driver.run = common.function(initial_hierarachical_collect_driver.run)
+            hierarachical_collect_driver.run = common.function(hierarachical_collect_driver.run)
+
+            tf.config.experimental_run_functions_eagerly(True)
+            if env_steps.result() == 0 or hierarchical_replay_buffer.num_frames() == 0:
+                logging.info(
+                    'Initializing replay buffer by collecting experience for %d steps'
+                    'with a random policy.', initial_collect_steps)
+                initial_hierarachical_collect_driver.run()
+            tf.config.experimental_run_functions_eagerly(False)
+
+        elif agent_name == 't_ddpg':
+            # Collect driver
+            initial_collect_driver = t_driver.DynamicStepDriver(
+                tf_env,
+                carla_env,
+                initial_collect_policy,
+                observers=replay_observer + train_metrics,
+                num_steps=initial_collect_steps)
+            collect_driver = t_driver.DynamicStepDriver(
+                tf_env,
+                carla_env,
+                collect_policy,
+                observers=replay_observer + train_metrics,
+                num_steps=collect_steps_per_iteration)
+
+            # Optimize the performance by using tf functions
+            initial_collect_driver.run = common.function(initial_collect_driver.run)
+            collect_driver.run = common.function(collect_driver.run)
             tf_agent.train = common.function(tf_agent.train)
-
-            # Collect initial intention replay data.
-            if env_steps.result() == 0 or intention_replay_buffer.num_frames() == 0:
+            tf.config.experimental_run_functions_eagerly(True)
+            # Collect initial replay data.
+            if env_steps.result() == 0 or replay_buffer.num_frames() == 0:
                 logging.info(
-                    'Initializing intention replay buffer by collecting experience for %d steps'
+                    'Initializing replay buffer by collecting experience for %d steps'
                     'with a random policy.', initial_collect_steps)
-                initial_intention_collect_driver.run()
-
-            if env_steps.result() == 0 or control_replay_buffer.num_frames() == 0:
-                logging.info(
-                    'Initializing control replay buffer by collecting experience for %d steps'
-                    'with a random policy.', initial_collect_steps)
-                initial_control_collect_driver.run()
-
+                initial_collect_driver.run()
+            tf.config.experimental_run_functions_eagerly(False)
+        
         else:
             # Collect driver
             initial_collect_driver = dynamic_step_driver.DynamicStepDriver(
@@ -898,7 +1128,8 @@ def train_eval(
                     'with a random policy.', initial_collect_steps)
                 initial_collect_driver.run()
 
-        if agent_name == 'latent_sac' or agent_name == 'latent_sac_transformer' or agent_name == 'h_latent_sac_transformer':
+        print('Initializing eval metrics')
+        if agent_name == 'latent_sac':
             compute_summaries(
                 eval_metrics,
                 eval_tf_env,
@@ -910,6 +1141,21 @@ def train_eval(
                 model_net=model_net,
                 fps=10,
                 image_keys=input_names + mask_names)
+            metric_utils.log_metrics(eval_metrics)
+        elif agent_name == 't_ddpg' or agent_name == 'ht_ddpg':
+            tf.config.experimental_run_functions_eagerly(True)
+            results = t_driver.eager_compute(
+                eval_metrics,
+                eval_tf_env,
+                carla_env,
+                eval_policy,
+                num_episodes=1,
+                train_step=env_steps.result(),
+                summary_writer=summary_writer,
+                summary_prefix='Eval',
+            )
+            tf.config.experimental_run_functions_eagerly(False)
+            metric_utils.log_metrics(eval_metrics)
         else:
             results = metric_utils.eager_compute(
                 eval_metrics,
@@ -922,24 +1168,14 @@ def train_eval(
             )
             metric_utils.log_metrics(eval_metrics)
 
-        if agent_name == 'h_ddpg' or agent_name == 'h_ddpg_transformer' or agent_name == 'h_latent_sac_transformer':
-            # Dataset generates trajectories with shape [Bxslx...]
-            intention_dataset = intention_replay_buffer.as_dataset(
+        print('Setting up replay buffer')
+        if agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
+            hierarchical_dataset = hierarchical_replay_buffer.as_dataset(
                 num_parallel_calls=3,
                 sample_batch_size=batch_size,
                 num_steps=sequence_length + 1).prefetch(3)
-            intention_iterator = iter(intention_dataset)
-            control_dataset = control_replay_buffer.as_dataset(
-                num_parallel_calls=3,
-                sample_batch_size=batch_size,
-                num_steps=sequence_length + 1).prefetch(3)
-            control_iterator = iter(control_dataset)
+            hierarchical_iterator = iter(hierarchical_dataset)
 
-            # Get train step
-            def train_step():
-                intention_experience, _ = next(intention_iterator)
-                control_experience, _ = next(control_iterator)
-                return tf_agent.train(intention_experience, control_experience)
         else:
             # Dataset generates trajectories with shape [Bxslx...]
             dataset = replay_buffer.as_dataset(
@@ -953,56 +1189,77 @@ def train_eval(
                 experience, _ = next(iterator)
                 return tf_agent.train(experience)
 
-        train_step = common.function(train_step)
+            train_step = common.function(train_step)
 
-        if agent_name == 'latent_sac' or 'latent_sac_transformer':
+        if agent_name == 'latent_sac':
             def train_model_step():
                 experience, _ = next(iterator)
                 return tf_agent.train_model(experience)
 
             train_model_step = common.function(train_model_step)
 
-        if agent_name == 'h_latent_sac_transformer':
-            def train_model_step():
-                intention_experience, _ = next(intention_iterator)
-                control_experience, _ = next(control_iterator)
-                return tf_agent.train_model(intention_iterator, control_iterator)
-
-            train_model_step = common.function(train_model_step)
-
         # Training initializations
         time_step = None
         time_acc = 0
+
         env_steps_before = env_steps.result().numpy()
 
         # Start training
+        print('Start training')
         for iteration in range(num_iterations):
             start_time = time.time()
 
-            if (agent_name == 'latent_sac' or agent_name == 'latent_sac_transformer' or agent_name == 'h_latent_sac_transformer') and iteration < initial_model_train_steps:
-                train_model_step()
-            elif agent_name == 'h_ddpg' or agent_name == 'h_ddpg_transformer' or agent_name == 'h_latent_sac_transformer':
-                # Run collect
-                intention_time_step, _ = intention_collect_driver.run(time_step=time_step)
-                control_time_step, _ = control_collect_driver.run(time_step=time_step)
 
+            if agent_name == 'latent_sac' and iteration < initial_model_train_steps:
+                train_model_step()
+            elif agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
+                tf.config.experimental_run_functions_eagerly(True)
+                time_step, _ = hierarachical_collect_driver.run(time_step=time_step)
+                tf.config.experimental_run_functions_eagerly(False)
+            elif agent_name == 't_ddpg':
+                tf.config.experimental_run_functions_eagerly(True)
+                time_step, _ = collect_driver.run(time_step=time_step)
+                tf.config.experimental_run_functions_eagerly(False)
             else:
                 # Run collect
                 time_step, _ = collect_driver.run(time_step=time_step)
 
             # Train an iteration
+
             for _ in range(train_steps_per_iteration):
-                train_step()
+                if agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
+                    intention_experience, _ = next(hierarchical_iterator)
+                    control_experience, _ = next(hierarchical_iterator)
+
+                    # np.set_printoptions(threshold=np.inf)
+                    # f = open("./check.txt", 'w+')
+                    # print(intention_experience.action, file=f)
+                    # sys.exit()
+
+                    if agent_name == 'h_ddpg':
+                        _intention_experience, _control_experience = prepare_experience(intention_experience, control_experience, 'camera')
+                    else:
+                        _intention_experience, _control_experience = prepare_experience(intention_experience, control_experience, 'birdeye')
+
+                    intention_agent.train(_intention_experience)
+                    control_agent.train(_control_experience)
+                else:
+                    train_step()
 
             time_acc += time.time() - start_time
 
-            if env_steps.result() > 52000:
+            if env_steps.result() > 60000:
                 sys.exit()
 
             # Log training information
+
             if global_step.numpy() % log_interval == 0:
-                logging.info('env steps = %d, average return = %f', env_steps.result(),
-                             average_return.result())
+                if agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
+                    logging.info('env steps = %d, average return = %f', env_steps.result(),
+                                 control_average_return.result())
+                else:
+                    logging.info('env steps = %d, average return = %f', env_steps.result(),
+                                 average_return.result())
                 env_steps_per_sec = (env_steps.result().numpy() -
                                      env_steps_before) / time_acc
                 logging.info('%.3f env steps/sec', env_steps_per_sec)
@@ -1014,13 +1271,19 @@ def train_eval(
                 env_steps_before = env_steps.result().numpy()
 
             # Get training metrics
-            for train_metric in train_metrics:
-                train_metric.tf_summaries(train_step=env_steps.result())
+            if agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
+                for train_metric in intention_train_metrics:
+                    train_metric.tf_summaries(train_step=env_steps.result())
+                for train_metric in control_train_metrics:
+                    train_metric.tf_summaries(train_step=env_steps.result())
+            else:
+                for train_metric in train_metrics:
+                    train_metric.tf_summaries(train_step=env_steps.result())
 
             # Evaluation
             if global_step.numpy() % eval_interval == 0:
                 # Log evaluation metrics
-                if agent_name == 'latent_sac' or 'latent_sac_transformer' or 'h_latent_sac_transformer':
+                if agent_name == 'latent_sac':
                     compute_summaries(
                         eval_metrics,
                         eval_tf_env,
@@ -1032,6 +1295,20 @@ def train_eval(
                         model_net=model_net,
                         fps=10,
                         image_keys=input_names + mask_names)
+                elif agent_name == 't_ddpg' or agent_name == 'ht_ddpg':
+                    tf.config.experimental_run_functions_eagerly(True)
+                    results = t_driver.eager_compute(
+                        eval_metrics,
+                        eval_tf_env,
+                        carla_env,
+                        eval_policy,
+                        num_episodes=num_eval_episodes,
+                        train_step=env_steps.result(),
+                        summary_writer=summary_writer,
+                        summary_prefix='Eval',
+                    )
+                    tf.config.experimental_run_functions_eagerly(False)
+                    metric_utils.log_metrics(eval_metrics)
                 else:
                     results = metric_utils.eager_compute(
                         eval_metrics,
@@ -1043,17 +1320,29 @@ def train_eval(
                         summary_prefix='Eval',
                     )
                     metric_utils.log_metrics(eval_metrics)
+            if agent_name == 'h_ddpg' or agent_name == 'ht_ddpg':
+                # Save checkpoints
+                global_step_val = global_step.numpy()
+                if global_step_val % train_checkpoint_interval == 0:
+                    intention_train_checkpointer.save(global_step=global_step_val)
+                    control_train_checkpointer.save(global_step=global_step_val)
 
-            # Save checkpoints
-            global_step_val = global_step.numpy()
-            if global_step_val % train_checkpoint_interval == 0:
-                train_checkpointer.save(global_step=global_step_val)
+                if global_step_val % policy_checkpoint_interval == 0:
+                    policy_checkpointer.save(global_step=global_step_val)
 
-            if global_step_val % policy_checkpoint_interval == 0:
-                policy_checkpointer.save(global_step=global_step_val)
+                if global_step_val % rb_checkpoint_interval == 0:
+                    hierarchical_rb_checkpointer.save(global_step=global_step_val)
+            else:
+                # Save checkpoints
+                global_step_val = global_step.numpy()
+                if global_step_val % train_checkpoint_interval == 0:
+                    train_checkpointer.save(global_step=global_step_val)
 
-            if global_step_val % rb_checkpoint_interval == 0:
-                rb_checkpointer.save(global_step=global_step_val)
+                if global_step_val % policy_checkpoint_interval == 0:
+                    policy_checkpointer.save(global_step=global_step_val)
+
+                if global_step_val % rb_checkpoint_interval == 0:
+                    rb_checkpointer.save(global_step=global_step_val)
 
 
 def main(_):

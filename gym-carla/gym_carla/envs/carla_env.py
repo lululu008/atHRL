@@ -577,7 +577,7 @@ class CarlaEnv(gym.Env):
         self.display.blit(birdeye_surface, (0, 0))
 
         # if self.obs_count % 5 == 0:
-        #     pygame.image.save(birdeye_surface, "./images/birdeye/"+str(self.obs_count//30)+".jpeg")
+        #     pygame.image.save(birdeye_surface, "./images/birdeye/"+str(self.obs_count//5)+".jpeg")
 
         ## Lidar image generation
         point_cloud = []
