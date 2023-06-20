@@ -1,4 +1,9 @@
-# Action and Trajectory Planning for Urban Autonomous Driving with Hierarchical Reinforcement Learning
+# Action and Trajectory Planning using Hierarchical Reinforcement Learning （atHRL)
+
+This is the code for the atHRL framework presented in the paper:
+Xinyang Lu, Flint Xiaofeng Fan and Tianying Wang. "Action and Trajectory Planning for Urban Autonomous Driving with
+Hierarchical Reinforcement Learning."
+
 ## Dependency
 ### gym-carla
 
@@ -13,7 +18,7 @@ $ pip install -e .
 $ export PYTHONPATH=$PYTHONPATH:$YourFolder$/CARLA_0.9.6/PythonAPI/carla/dist/carla-0.9.6-py3.5-linux-x86_64.egg
 ```
 
-### interp_e2e_driving
+### atHRL
 
 1. Enter the code folder and install the packages:
 ```
