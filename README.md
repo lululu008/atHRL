@@ -1,4 +1,4 @@
-# Autonomous Driving
+# Action and Trajectory Planning for Urban Autonomous Driving with Hierarchical Reinforcement Learning
 ## Dependency
 ### gym-carla
 
