@@ -13,11 +13,16 @@ This work introduces a three-level hierarchical reinforcement learning method to
 ## Results
 
 Experiments are conducted in three different maps, Town02, Town03, and Town04 in the CARLA simulator.
-
-![Alt text](https://github.com/lululu008/atHRL/blob/main/imgs/maps.png)
+<p align="center">
+  <img src=https://github.com/lululu008/atHRL/blob/main/imgs/maps.png>
+</p>
 
 The atHRL method achieves the highest average reward and average speed in Town03.
-![alt-text-1](https://github.com/lululu008/atHRL/blob/main/imgs/reward.png) "title-1") ![alt-text-2](https://github.com/lululu008/atHRL/blob/main/imgs/speed.png)
+
+<p align="center">
+  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/reward.png" width="100" />
+  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/speed.png" width="100" /> 
+</p>
 
 
 ## Installation
