@@ -28,8 +28,8 @@ The results show that atHRL method achieves the highest average reward and avera
 In addition, experiments were conducted on the other two maps Town02 and Town04, and show a better performance as well.
 
 <p align="center">
-  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/bar_t2"/>
-  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/bar_t3"/> 
+  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/bar_t2.png"/>
+  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/bar_t4.png"/> 
 </p>
 
 
