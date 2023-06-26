@@ -4,7 +4,7 @@ This is the code for the atHRL framework presented in the paper:
 Xinyang Lu, Flint Xiaofeng Fan and Tianying Wang. "Action and Trajectory Planning for Urban Autonomous Driving with
 Hierarchical Reinforcement Learning."
 
-![Alt text](https://github.com/lululu008/atHRL/blob/main/workflow.png)
+![Alt text](https://github.com/lululu008/atHRL/blob/main/imgs/workflow.png)
 
 # TLDR
 
@@ -12,7 +12,12 @@ This work introduces a three-level hierarchical reinforcement learning method to
 
 ## Results
 
-The atHRL method achieves the highest average reward and average speed in three different maps, Town02, Town03, and Town04 in the CARLA simulator.
+Experiments are conducted in three different maps, Town02, Town03, and Town04 in the CARLA simulator.
+
+![Alt text](https://github.com/lululu008/atHRL/blob/main/imgs/maps.png)
+
+The atHRL method achieves the highest average reward and average speed in Town03.
+![alt-text-1](https://github.com/lululu008/atHRL/blob/main/imgs/reward.png) "title-1") ![alt-text-2](https://github.com/lululu008/atHRL/blob/main/imgs/speed.png)
 
 
 ## Installation
