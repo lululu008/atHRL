@@ -17,13 +17,13 @@ $ conda activate env_name
 
 2. Install the gym-carla wrapper (https://github.com/cjy1992/gym-carla) by following the installation steps:
 
-  2.1 Enter the gym-carla folder and install the packages:
+  - Enter the gym-carla folder and install the packages:
   ```
   $ pip install -r requirements.txt
   $ pip install -e .
   ```
 
-  2.2 Download [CARLA_0.9.6](https://github.com/carla-simulator/carla/releases/tag/0.9.6), extract it to some folder, and add CARLA to ```PYTHONPATH``` environment variable:
+  - Download [CARLA_0.9.6](https://github.com/carla-simulator/carla/releases/tag/0.9.6), extract it to some folder, and add CARLA to ```PYTHONPATH``` environment variable:
   ```
   $ export PYTHONPATH=$PYTHONPATH:$YourFolder$/CARLA_0.9.6/PythonAPI/carla/dist/carla-0.9.6-py3.5-linux-x86_64.egg
   ```
