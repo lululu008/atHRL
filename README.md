@@ -21,8 +21,8 @@ Experiments are conducted in the CARLA simulator with a comparison against sever
 The results show that atHRL method achieves the highest average reward and average speed among all the methods in the map Town03 in the CARLA simulator.
 
 <p align="center">
-  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/reward.png"/>
-  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/speed.png"/> 
+  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/reward.png" width=400/>
+  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/speed.png" width=400/> 
 </p>
 
 In addition, experiments were conducted on the other two maps Town02 and Town04, and show a better performance as well.
