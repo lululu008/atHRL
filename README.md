@@ -12,16 +12,24 @@ This work introduces a three-level hierarchical reinforcement learning method to
 
 ## Results
 
-Experiments are conducted in three different maps, Town02, Town03, and Town04 in the CARLA simulator.
+Experiments are conducted in the CARLA simulator with a comparison against several other methods including DDPG, hierarchical DPPG, and hierarchical DQN.
+
 <p align="center">
-  <img src=https://github.com/lululu008/atHRL/blob/main/imgs/maps.png>
+  <img src=https://github.com/lululu008/atHRL/blob/main/imgs/training.png>
 </p>
 
-The atHRL method achieves the highest average reward and average speed in Town03.
+The results show that atHRL method achieves the highest average reward and average speed among all the methods in the map Town03 in the CARLA simulator.
 
 <p align="center">
   <img src="https://github.com/lululu008/atHRL/blob/main/imgs/reward.png"/>
   <img src="https://github.com/lululu008/atHRL/blob/main/imgs/speed.png"/> 
+</p>
+
+In addition, experiments were conducted on the other two maps Town02 and Town04, and show a better performance as well.
+
+<p align="center">
+  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/bar_t2"/>
+  <img src="https://github.com/lululu008/atHRL/blob/main/imgs/bar_t3"/> 
 </p>
 
 
