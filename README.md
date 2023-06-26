@@ -8,26 +8,29 @@ Hierarchical Reinforcement Learning."
 
 This work introduces a three-level hierarchical reinforcement learning method to handle autonomous driving in complex urban scenarios.
 
-## Dependency
-### gym-carla
+## Installation
+1. Setup conda environment
+```
+$ conda create -n env_name python=3.6
+$ conda activate env_name
+```
 
-1. Enter the gym-carla folder and install the packages:
+2. Install the gym-carla wrapper (https://github.com/cjy1992/gym-carla) by following the installation steps:
+
+  2.1 Enter the gym-carla folder and install the packages:
+  ```
+  $ pip install -r requirements.txt
+  $ pip install -e .
+  ```
+
+  2.2 Download [CARLA_0.9.6](https://github.com/carla-simulator/carla/releases/tag/0.9.6), extract it to some folder, and add CARLA to ```PYTHONPATH``` environment variable:
+  ```
+  $ export PYTHONPATH=$PYTHONPATH:$YourFolder$/CARLA_0.9.6/PythonAPI/carla/dist/carla-0.9.6-py3.5-linux-x86_64.egg
+  ```
+
+3. Enter the code folder and install the packages:
 ```
 $ pip install -r requirements.txt
-$ pip install -e .
-```
-
-2. Download [CARLA_0.9.6](https://github.com/carla-simulator/carla/releases/tag/0.9.6), extract it to some folder, and add CARLA to ```PYTHONPATH``` environment variable:
-```
-$ export PYTHONPATH=$PYTHONPATH:$YourFolder$/CARLA_0.9.6/PythonAPI/carla/dist/carla-0.9.6-py3.5-linux-x86_64.egg
-```
-
-### atHRL
-
-1. Enter the code folder and install the packages:
-```
-$ pip install -r requirements.txt
-$ pip install -e .
 ```
 
 ## Usage
