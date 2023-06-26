@@ -6,7 +6,14 @@ Hierarchical Reinforcement Learning."
 
 ![Alt text](https://github.com/lululu008/atHRL/blob/main/workflow.png)
 
-This work introduces a three-level hierarchical reinforcement learning method to handle autonomous driving in complex urban scenarios.
+# TLDR
+
+This work introduces a three-level hierarchical reinforcement learning method to handle autonomous driving in complex urban scenarios. It learns to make decisions about the agent’s future trajectory and computes target waypoints under continuous settings based on a hierarchical DDPG algorithm. The waypoints planned by the model are then sent to a low-level controller to generate the steering and throttle commands required for the vehicle maneuver.
+
+## Results
+
+The atHRL method achieves the highest average reward and average speed in three different maps, Town02, Town03, and Town04 in the CARLA simulator.
+
 
 ## Installation
 1. Setup conda environment
