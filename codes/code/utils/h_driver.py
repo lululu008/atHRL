@@ -29,7 +29,7 @@ from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 from tf_agents.utils import nest_utils
 
-from interp_e2e_driving.utils.common_utils import intention_value, duplicate_digits_2
+from code.utils.common_utils import intention_value, duplicate_digits_2
 
 
 def is_bandit_env(env):

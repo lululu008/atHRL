@@ -1,10 +1,3 @@
-# Copyright (c) 2020: Jianyu Chen (jianyuchen@berkeley.edu).
-#
-# This file is modified from <https://github.com/alexlee-gk/slac>:
-# Copyright (c) 2019 alexlee-gk
-#
-# This work is licensed under the terms of the MIT license.
-# For a copy, see <https://opensource.org/licenses/MIT>.
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function

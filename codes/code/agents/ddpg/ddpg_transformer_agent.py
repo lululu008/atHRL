@@ -17,7 +17,7 @@ from tf_agents.utils import common
 from tf_agents.utils import eager_utils
 from tf_agents.utils import nest_utils
 
-from interp_e2e_driving.policies import actor_transformer_policy
+from code.policies import actor_transformer_policy
 
 
 class DdpgInfo(collections.namedtuple(

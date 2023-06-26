@@ -4,8 +4,8 @@ from __future__ import print_function
 
 import gin
 
-from interp_e2e_driving.agents.ddpg.h_ddpg_agent import DdpgAgent
-from interp_e2e_driving.policies import h_actor_policy
+from code.agents.ddpg.h_ddpg_agent import DdpgAgent
+from code.policies import ht_actor_policy
 
 
 @gin.configurable
@@ -77,7 +77,7 @@ class HierarchicalDdpgAgent:
             summarize_grads_and_vars=summarize_grads_and_vars
         )
 
-        self.policy = h_actor_policy.HierarchicalActorPolicy(
+        self.policy = ht_actor_policy.HierarchicalActorPolicy(
             intention_time_step_spec=intention_time_step_spec,
             intention_action_spec=intention_action_spec,
             control_time_step_spec=control_time_step_spec,
@@ -87,7 +87,7 @@ class HierarchicalDdpgAgent:
             clip=True
         )
 
-        self.collect_policy = h_actor_policy.HierarchicalActorPolicy(
+        self.collect_policy = ht_actor_policy.HierarchicalActorPolicy(
             intention_time_step_spec=intention_time_step_spec,
             intention_action_spec=intention_action_spec,
             control_time_step_spec=control_time_step_spec,

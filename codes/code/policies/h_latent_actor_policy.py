@@ -3,14 +3,12 @@ from __future__ import division
 from __future__ import print_function
 
 import gin
-import tensorflow as tf
-from tf_agents.policies import actor_policy
 
-from interp_e2e_driving.utils.common_utils import intention_value, duplicate_digits_3
+from code.policies import latent_actor_policy
 
 
 @gin.configurable
-class HierarchicalActorPolicy(actor_policy.ActorPolicy):
+class HierarchicalLatentActorPolicy(latent_actor_policy.LatentActorPolicy):
 
     def __init__(self,
                  intention_time_step_spec,
@@ -19,9 +17,7 @@ class HierarchicalActorPolicy(actor_policy.ActorPolicy):
                  control_action_spec,
                  intention_agent,
                  control_agent,
-                 info_spec=(),
                  clip=True,
-                 training=False,
                  name=None):
         self.intention_agent = intention_agent
         self.control_agent = control_agent
@@ -30,19 +26,16 @@ class HierarchicalActorPolicy(actor_policy.ActorPolicy):
         self.control_time_step_spec = control_time_step_spec
         self.control_action_spec = control_action_spec
 
-        super(HierarchicalActorPolicy, self).__init__(
+        super(HierarchicalLatentActorPolicy, self).__init__(
             time_step_spec=intention_time_step_spec,
             action_spec=control_action_spec,
-            actor_network=intention_agent._actor_network,
-            info_spec=info_spec,
+            inner_policy=intention_agent.inner_policy,
+            model_network=intention_agent.model_network,
             clip=clip,
             name=name)
 
     def _action(self, time_step, policy_state, seed):
         intention_step = self.intention_agent.policy.action(time_step, policy_state)
-        intention_step = intention_step._replace(action=(duplicate_digits_3(intention_step.action)))
-        intention = intention_value(intention_step.action)
-        time_step.observation.update({'intention': intention})
-        action_step = self.control_agent.policy.action(time_step, policy_state)
+        control_time_step = time_step.observation.append(intention_step.action)
+        action_step = self.control_agent.policy.action(control_time_step, policy_state)
         return action_step
-

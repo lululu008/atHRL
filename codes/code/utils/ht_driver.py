@@ -30,8 +30,8 @@ from tf_agents.drivers import driver
 from tf_agents.utils import common
 from tf_agents.utils import nest_utils
 
-from interp_e2e_driving.utils.common_utils import intention_value, duplicate_digits_3
-from interp_e2e_driving.utils.pid_control import waypoint_to_control
+from code.utils.common_utils import intention_value, duplicate_digits_3
+from code.utils.pid_control import waypoint_to_control
 
 
 def is_bandit_env(env):

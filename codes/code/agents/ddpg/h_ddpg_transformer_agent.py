@@ -4,8 +4,8 @@ from __future__ import print_function
 
 import gin
 
-from interp_e2e_driving.agents.ddpg.h_ddpg_agent import DdpgAgent
-from interp_e2e_driving.policies import ht_actor_policy
+from code.agents.ddpg.ddpg_transformer_agent import TransformerDdpgAgent
+from code.policies import h_actor_policy
 
 
 @gin.configurable
@@ -16,10 +16,8 @@ class HierarchicalDdpgAgent:
                  intention_action_spec,
                  control_time_step_spec,
                  control_action_spec,
-                 intention_actor_network,
-                 intention_critic_network,
-                 control_actor_network,
-                 control_critic_network,
+                 actor_network,
+                 critic_network,
                  actor_optimizer=None,
                  critic_optimizer=None,
                  ou_stddev=1.0,
@@ -38,15 +36,15 @@ class HierarchicalDdpgAgent:
                  train_step_counter=None,
                  name=None):
 
-        self.intention_agent = DdpgAgent(
+        self.intention_agent = TransformerDdpgAgent(
             intention_time_step_spec,
             intention_action_spec,
-            actor_network=intention_actor_network,
-            critic_network=intention_critic_network,
+            actor_network=actor_network,
+            critic_network=critic_network,
             actor_optimizer=actor_optimizer,
             critic_optimizer=critic_optimizer,
-            ou_stddev=None,
-            ou_damping=None,
+            ou_stddev=ou_stddev,
+            ou_damping=ou_damping,
             target_update_tau=target_update_tau,
             target_update_period=target_update_period,
             dqda_clipping=dqda_clipping,
@@ -57,11 +55,11 @@ class HierarchicalDdpgAgent:
             debug_summaries=debug_summaries,
             summarize_grads_and_vars=summarize_grads_and_vars
         )
-        self.control_agent = DdpgAgent(
+        self.control_agent = TransformerDdpgAgent(
             control_time_step_spec,
             control_action_spec,
-            actor_network=control_actor_network,
-            critic_network=control_critic_network,
+            actor_network=actor_network,
+            critic_network=critic_network,
             actor_optimizer=actor_optimizer,
             critic_optimizer=critic_optimizer,
             ou_stddev=ou_stddev,
@@ -77,7 +75,7 @@ class HierarchicalDdpgAgent:
             summarize_grads_and_vars=summarize_grads_and_vars
         )
 
-        self.policy = ht_actor_policy.HierarchicalActorPolicy(
+        self.policy = h_actor_policy.HierarchicalActorPolicy(
             intention_time_step_spec=intention_time_step_spec,
             intention_action_spec=intention_action_spec,
             control_time_step_spec=control_time_step_spec,
@@ -87,7 +85,7 @@ class HierarchicalDdpgAgent:
             clip=True
         )
 
-        self.collect_policy = ht_actor_policy.HierarchicalActorPolicy(
+        self.collect_policy = h_actor_policy.HierarchicalActorPolicy(
             intention_time_step_spec=intention_time_step_spec,
             intention_action_spec=intention_action_spec,
             control_time_step_spec=control_time_step_spec,
@@ -96,3 +94,7 @@ class HierarchicalDdpgAgent:
             control_agent=self.control_agent,
             clip=False
         )
+
+    def train(self, intention_experience, control_experience, weights=None):
+        self.intention_agent.train(intention_experience, weights)
+        self.control_agent.train(control_experience, weights)

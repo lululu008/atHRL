@@ -32,7 +32,7 @@ from tf_agents.trajectories import trajectory
 from tf_agents.utils import common
 from tf_agents.utils import nest_utils
 
-from interp_e2e_driving.utils.pid_control import waypoint_to_control
+from code.utils.pid_control import waypoint_to_control
 
 
 def is_bandit_env(env):
@@ -420,11 +420,9 @@ def eager_compute(metrics,
     driver.run(time_step, policy_state)
 
   results = [(metric.name, metric.result()) for metric in metrics]
-  # TODO(b/120301678) remove the summaries and merge with compute
   if train_step and summary_writer:
     with summary_writer.as_default():
       for m in metrics:
         tag = common.join_scope(summary_prefix, m.name)
         tf.compat.v2.summary.scalar(name=tag, data=m.result(), step=train_step)
-  # TODO(b/130249101): Add an option to log metrics.
   return collections.OrderedDict(results)
