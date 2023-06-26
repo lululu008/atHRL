@@ -6,6 +6,7 @@ Hierarchical Reinforcement Learning."
 
 ![Alt text](https://github.com/lululu008/atHRL/blob/main/workflow.png)
 
+This work introduces a three-level hierarchical reinforcement learning method to handle autonomous driving in complex urban scenarios.
 
 ## Dependency
 ### gym-carla
